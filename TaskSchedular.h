@@ -1,6 +1,8 @@
 #pragma once
 #include <condition_variable>
-#include <queue>
+#include <list>
+#include <vector>
+
 namespace fb
 {
 	class FTaskSchedular;
@@ -15,11 +17,26 @@ namespace fb
 		Count
 	};
 
-	class FTask
+	class FTask;
+	class ITaskListener {
+	public:
+		virtual void OnTaskFinish(FTask* task) {}
+	};
+
+	class FTask : public ITaskListener
 	{
 	public:
+		std::vector<ITaskListener*> TaskListeners;
 		bool AutoDelete = false;
+
 		virtual void Run() = 0;
+		virtual bool CanRun() const = 0;
+		void NotifyFinish()
+		{
+			for (auto listener : TaskListeners) {
+				listener->OnTaskFinish(this);
+			}
+		}
 	};
 
 	class FTaskThread
@@ -39,13 +56,17 @@ namespace fb
 	class FTaskSchedular
 	{
 		std::mutex Mutex;
-		std::queue<FTask*> Tasks[(int)ETaskPriority::Count];
+		std::list<FTask*> Tasks[(int)ETaskPriority::Count];
 		std::vector<FTaskThread*> TaskThreads;
+		bool Finish = true;
+		bool Quit = false;
+		std::condition_variable CVFinish;
 
 	public:
 		void CreateTaskThreads(int numTaskThreads);
 		void FinishTaskThreads();
 		void AddTask(FTask* task, ETaskPriority priority);
+		void Wait();
 
 	private:
 		friend void TaskThread(FTaskThread* taskThread);

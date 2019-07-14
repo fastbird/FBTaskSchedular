@@ -1,6 +1,7 @@
 #pragma once
 #include "TaskSchedular.h"
 #include <chrono>
+#include <assert.h>
 namespace fb
 {
 
@@ -46,6 +47,7 @@ void FTaskSchedular::CreateTaskThreads(int numTaskThreads)
 }
 
 void FTaskSchedular::FinishTaskThreads() {
+	Quit = true;
 	for (auto taskThread : TaskThreads) {
 		std::unique_lock lock(taskThread->Mutex);
 		taskThread->Quit = true;
@@ -63,36 +65,61 @@ void FTaskSchedular::FinishTaskThreads() {
 void FTaskSchedular::AddTask(FTask* task, ETaskPriority priority)
 {
 	std::unique_lock lock(Mutex);
+	Finish = false;
 	for (int i = 0; i <= (int)priority; ++i) {
 		if (!Tasks[i].empty()) {
-			Tasks[(int)priority].push(task);
-			return;
+			Tasks[(int)priority].push_back(task);
+			break;
 		}
 	}
-
-	for (auto taskThread : TaskThreads) {
-		std::unique_lock lock(taskThread->Mutex);
-		if (!taskThread->Task && !taskThread->Quit) {
-			taskThread->Task = task;
-			lock.unlock();
-			taskThread->CV.notify_one();
-			return;
+	if (task->CanRun()) {
+		for (auto taskThread : TaskThreads) {
+			std::unique_lock lock(taskThread->Mutex);
+			if (!taskThread->Task && !taskThread->Quit) {
+				taskThread->Task = task;
+				lock.unlock();
+				taskThread->CV.notify_one();
+				return;
+			}
 		}
 	}
+	assert(priority != ETaskPriority::Count);
+	Tasks[(int)priority].push_back(task);
+}
 
-	Tasks[(int)priority].push(task);
+void FTaskSchedular::Wait()
+{
+	using namespace std::chrono_literals;
+	while (!Quit) {
+		std::unique_lock lock(Mutex);
+		CVFinish.wait_for(lock, 1s, [this]() {return Finish; });
+	}
 }
 
 FTask* FTaskSchedular::PopTask()
 {
 	std::unique_lock lock(Mutex);
+	bool foundPending = false;
 	for (int i = 0; i < (int)ETaskPriority::Count; ++i) {
-		if (!Tasks[i].empty()) {
-			auto front = Tasks[i].front();
-			Tasks[i].pop();
-			return front;
+		for (auto it = Tasks[i].begin(); it != Tasks[i].end(); ++it) {
+			if ((*it)->CanRun()) {
+				auto ret = *it;
+				Tasks[i].erase(it);
+				return ret;
+			}
+			else {
+				foundPending = true;
+			}
 		}
 	}
+	Finish = true;
+	if (foundPending)
+	{
+		assert(0 && "Possibly, it is a dependency error");
+	}
+	lock.unlock();
+	CVFinish.notify_one();
+
 	return nullptr;
 }
 
