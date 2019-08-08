@@ -66,12 +66,6 @@ void FTaskSchedular::AddTask(FTask* task, ETaskPriority priority)
 {
 	std::unique_lock lock(Mutex);
 	Finish = false;
-	for (int i = 0; i <= (int)priority; ++i) {
-		if (!Tasks[i].empty()) {
-			Tasks[(int)priority].push_back(task);
-			break;
-		}
-	}
 	if (task->CanRun()) {
 		for (auto taskThread : TaskThreads) {
 			std::unique_lock lock(taskThread->Mutex);
